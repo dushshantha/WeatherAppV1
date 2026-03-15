@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import ForecastCard from '../components/ForecastCard';
 import WeatherStatWidget from '../components/WeatherStatWidget';
@@ -7,6 +7,8 @@ import WeatherIcon from '../components/WeatherIcon';
 import type { WeatherCondition } from '../components/WeatherIcon';
 import { useTheme } from '../context/ThemeContext';
 import { useWeather } from '../hooks/useWeather';
+import { useGeolocation } from '../hooks/useGeolocation';
+import { reverseGeocode } from '../services/weatherApi';
 
 type ForecastTab = 'hourly' | 'weekly';
 type TempUnit = 'C' | 'F';
@@ -244,19 +246,40 @@ function SkeletonBar({ width, height, borderRadius = 6 }: { width: number | stri
 // HomeScreen
 // ---------------------------------------------------------------------------
 interface HomeScreenProps {
+  city?: string;
+  onCityChange?: (city: string) => void;
   onNavigateToSearch?: () => void;
 }
 
-export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
+export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigateToSearch }: HomeScreenProps) {
   const [activeTab, setActiveTab] = useState<ForecastTab>('hourly');
   const [tabDirection, setTabDirection] = useState(0);
   const [activeHourlyCard, setActiveHourlyCard] = useState(0);
   const [activeWeeklyCard, setActiveWeeklyCard] = useState(0);
   const [tempUnit, setTempUnit] = useState<TempUnit>('C');
+  const [geoError, setGeoError] = useState<string | null>(null);
 
   const { theme, toggleTheme } = useTheme();
-  const { data, loading, error, usingMockData } = useWeather('Montreal');
+  const { data, loading, error, usingMockData } = useWeather(city);
+  const geo = useGeolocation();
   const current = data?.current;
+
+  // When geolocation coords arrive, reverse geocode to get city name
+  useEffect(() => {
+    if (geo.lat !== null && geo.lon !== null) {
+      reverseGeocode(geo.lat, geo.lon)
+        .then((detectedCity) => {
+          setGeoError(null);
+          onCityChange?.(detectedCity);
+        })
+        .catch(() => {
+          setGeoError('Could not detect your city. Check your API key.');
+        });
+    }
+    if (geo.error) {
+      setGeoError(geo.error);
+    }
+  }, [geo.lat, geo.lon, geo.error]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build display-ready forecast arrays from live data (or fall back to static)
   const liveHourly = data?.hourly.map((h) => ({
@@ -326,6 +349,10 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
         @keyframes skeletonPulse {
           0%, 100% { opacity: 0.3; }
           50% { opacity: 0.65; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
         .scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
@@ -536,13 +563,74 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
           </div>
         ) : (
           <>
-            {/* City name */}
-            <div style={{
-              fontSize: 28, fontWeight: 600, color: 'var(--color-text-primary)',
-              letterSpacing: '-0.5px', lineHeight: 1.2,
-            }}>
-              {current?.city ?? 'Montreal'}
+            {/* City name + Use my location button */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <div style={{
+                fontSize: 28, fontWeight: 600, color: 'var(--color-text-primary)',
+                letterSpacing: '-0.5px', lineHeight: 1.2,
+              }}>
+                {current?.city ?? city}
+              </div>
+              <button
+                onClick={() => { setGeoError(null); geo.getLocation(); }}
+                disabled={geo.loading}
+                aria-label="Use my location"
+                title="Use my location"
+                style={{
+                  pointerEvents: 'auto',
+                  background: 'rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.18)',
+                  borderRadius: '50%',
+                  width: 28,
+                  height: 28,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: geo.loading ? 'default' : 'pointer',
+                  opacity: geo.loading ? 0.5 : 1,
+                  transition: 'opacity 0.2s',
+                  flexShrink: 0,
+                  padding: 0,
+                  marginTop: 2,
+                }}
+              >
+                {geo.loading ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                    style={{ animation: 'spin 1s linear infinite' }}>
+                    <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.35)" strokeWidth="2.5" />
+                    <path d="M12 3a9 9 0 0 1 9 9" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4" fill="white" />
+                    <circle cx="12" cy="12" r="8" stroke="white" strokeWidth="2" fill="none" />
+                    <line x1="12" y1="2" x2="12" y2="4" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                    <line x1="12" y1="20" x2="12" y2="22" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                    <line x1="2" y1="12" x2="4" y2="12" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                    <line x1="20" y1="12" x2="22" y2="12" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                )}
+              </button>
             </div>
+
+            {/* Geolocation error */}
+            {geoError && (
+              <div style={{
+                marginTop: 4,
+                padding: '4px 12px',
+                borderRadius: 8,
+                background: 'rgba(200,50,50,0.18)',
+                border: '1px solid rgba(200,80,80,0.3)',
+                fontSize: 11,
+                color: 'rgba(255,160,160,0.95)',
+                maxWidth: 240,
+                margin: '4px auto 0',
+                lineHeight: 1.4,
+                pointerEvents: 'auto',
+              }}>
+                {geoError}
+              </div>
+            )}
 
             {/* Temperature */}
             <div style={{

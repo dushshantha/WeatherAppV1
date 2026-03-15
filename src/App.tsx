@@ -7,6 +7,7 @@ type Screen = 'home' | 'search';
 
 function AppInner() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
+  const [selectedCity, setSelectedCity] = useState('Montreal');
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100svh', overflow: 'hidden' }}>
@@ -14,14 +15,24 @@ function AppInner() {
       <div
         className={`screen-slide ${currentScreen === 'home' ? 'screen-visible' : 'screen-exit-left'}`}
       >
-        <HomeScreen onNavigateToSearch={() => setCurrentScreen('search')} />
+        <HomeScreen
+          city={selectedCity}
+          onCityChange={setSelectedCity}
+          onNavigateToSearch={() => setCurrentScreen('search')}
+        />
       </div>
 
       {/* Search screen — slides in from right */}
       <div
         className={`screen-slide ${currentScreen === 'search' ? 'screen-visible' : 'screen-enter-right'}`}
       >
-        <WeatherSearchScreen onBack={() => setCurrentScreen('home')} />
+        <WeatherSearchScreen
+          onBack={() => setCurrentScreen('home')}
+          onCitySelect={(cityData) => {
+            setSelectedCity(cityData.city);
+            setCurrentScreen('home');
+          }}
+        />
       </div>
     </div>
   );
