@@ -68,3 +68,11 @@ html {
   pointer-events: none;
   z-index: 0;
 }
+
+/* Reduced motion — disable looping icon animations */
+@media (prefers-reduced-motion: reduce) {
+  .weather-icon-loop * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
