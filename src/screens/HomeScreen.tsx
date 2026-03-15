@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import ForecastCard from '../components/ForecastCard';
 import WeatherStatWidget from '../components/WeatherStatWidget';
@@ -9,6 +9,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useWeather } from '../hooks/useWeather';
 import { useGeolocation } from '../hooks/useGeolocation';
 import { reverseGeocode } from '../services/weatherApi';
+import { usePullToRefresh } from '../hooks/usePullToRefresh';
 
 type ForecastTab = 'hourly' | 'weekly';
 type TempUnit = 'C' | 'F';
@@ -54,6 +55,15 @@ function windDegToCompass(deg: number): string {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function formatRelativeTime(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return 'Updated just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `Updated ${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  return `Updated ${hours}h ago`;
 }
 
 function conditionIdToWeatherCondition(id: number): WeatherCondition {
@@ -258,9 +268,13 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
   const [activeWeeklyCard, setActiveWeeklyCard] = useState(0);
   const [tempUnit, setTempUnit] = useState<TempUnit>('C');
   const [geoError, setGeoError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [lastUpdatedLabel, setLastUpdatedLabel] = useState('Updated just now');
+  const [showToast, setShowToast] = useState(false);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { theme, toggleTheme } = useTheme();
-  const { data, loading, error, usingMockData } = useWeather(city);
+  const { data, loading, error, usingMockData, refetch } = useWeather(city);
   const geo = useGeolocation();
   const current = data?.current;
 
@@ -280,6 +294,30 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
       setGeoError(geo.error);
     }
   }, [geo.lat, geo.lon, geo.error]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Update relative timestamp every 30s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLastUpdatedLabel(formatRelativeTime(lastUpdated));
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [lastUpdated]);
+
+  const handleRefresh = useCallback(async () => {
+    await refetch();
+    const now = new Date();
+    setLastUpdated(now);
+    setLastUpdatedLabel(formatRelativeTime(now));
+
+    // Show 'Updated ✓' toast
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setShowToast(true);
+    toastTimerRef.current = setTimeout(() => setShowToast(false), 1800);
+  }, [refetch]);
+
+  const { isPulling, pullDistance, isRefreshing, handlers } = usePullToRefresh({
+    onRefresh: handleRefresh,
+  });
 
   // Build display-ready forecast arrays from live data (or fall back to static)
   const liveHourly = data?.hourly.map((h) => ({
@@ -353,6 +391,10 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
+        }
+        @keyframes pullSpinnerRotate {
+          from { transform: scale(1) rotate(0deg); }
+          to   { transform: scale(1) rotate(360deg); }
         }
         .scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
@@ -430,6 +472,100 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
         background: 'radial-gradient(ellipse, rgba(72,49,157,0.18) 0%, transparent 70%)',
         filter: 'blur(40px)', pointerEvents: 'none',
       }} />
+
+      {/* ================================================================
+          TOAST — 'Updated ✓'
+      ================================================================ */}
+      <AnimatePresence>
+        {showToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' } }}
+            exit={{ opacity: 0, y: -8, transition: { duration: 0.3, ease: 'easeIn' } }}
+            style={{
+              position: 'absolute',
+              top: 56,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 50,
+              background: 'rgba(40, 200, 130, 0.92)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              borderRadius: 20,
+              padding: '6px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#fff',
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+            }}
+          >
+            Updated ✓
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ================================================================
+          TOP-LEFT CONTROLS — desktop refresh button
+      ================================================================ */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          left: 16,
+          zIndex: 30,
+        }}
+      >
+        <button
+          onClick={handleRefresh}
+          aria-label="Refresh weather"
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            background: 'var(--glass-bg)',
+            backdropFilter: 'var(--glass-blur-sm)',
+            WebkitBackdropFilter: 'var(--glass-blur-sm)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-shadow)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'background 0.2s ease, transform 0.2s ease',
+            padding: 0,
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+            style={{
+              transition: 'transform 0.5s ease',
+              transform: isRefreshing ? 'rotate(360deg)' : 'rotate(0deg)',
+            }}
+          >
+            <path
+              d="M1 4v6h6M23 20v-6h-6"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
 
       {/* ================================================================
           TOP-RIGHT CONTROLS — theme toggle + C/F unit toggle
@@ -704,6 +840,7 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
           BOTTOM GLASSMORPHISM SHEET  (from y:519)
       ================================================================ */}
       <div
+        {...handlers}
         style={{
           position: 'absolute',
           top: 519,
@@ -723,12 +860,59 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
         }}
         className="scrollbar-hide"
       >
+        {/* Pull-to-refresh indicator */}
+        {(isPulling || isRefreshing) && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              height: isRefreshing ? 48 : Math.max(pullDistance, 8),
+              zIndex: 5,
+              pointerEvents: 'none',
+              overflow: 'hidden',
+              transition: isRefreshing ? 'height 0.2s ease' : undefined,
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                border: '2.5px solid rgba(255,255,255,0.2)',
+                borderTopColor: 'rgba(255,255,255,0.9)',
+                transform: isRefreshing
+                  ? 'scale(1)'
+                  : `scale(${Math.min(pullDistance / 80, 1)})`,
+                animation: isRefreshing ? 'pullSpinnerRotate 0.7s linear infinite' : undefined,
+                transition: isRefreshing ? undefined : 'transform 0.1s ease',
+              }}
+            />
+          </div>
+        )}
+
         {/* Drag handle */}
         <div style={{
           width: 36, height: 5, borderRadius: 3,
           background: 'rgba(255,255,255,0.28)',
           margin: '10px auto 0', flexShrink: 0,
         }} />
+
+        {/* Last-updated timestamp */}
+        <div style={{
+          textAlign: 'center',
+          fontSize: 11,
+          color: 'rgba(235,235,245,0.4)',
+          marginTop: 4,
+          flexShrink: 0,
+          letterSpacing: '0.02em',
+        }}>
+          {lastUpdatedLabel}
+        </div>
 
         {/* ── SEGMENTED CONTROL ──────────────────────────────────── */}
         <div
