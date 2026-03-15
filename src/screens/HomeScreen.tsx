@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import houseImg from '../assets/house.png';
 import { AnimatePresence, motion } from 'framer-motion';
 import ForecastCard from '../components/ForecastCard';
 import WeatherStatWidget from '../components/WeatherStatWidget';
@@ -620,7 +621,9 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
         )}
       </div>
 
-      <div style={{ position: 'absolute', top: 304, left: '50%', transform: 'translateX(-50%)', zIndex: 2, pointerEvents: 'none' }}><HouseIllustration /></div>
+      <div style={{ position: 'absolute', top: 304, left: '50%', transform: 'translateX(-50%)', zIndex: 2, pointerEvents: 'none' }}>
+        <img src={houseImg} alt="" aria-hidden="true" style={{ width: 280, height: 140, objectFit: 'contain', mixBlendMode: 'multiply' }} />
+      </div>
 
       {/* ================================================================
           BOTTOM GLASSMORPHISM SHEET  (from y:519)
