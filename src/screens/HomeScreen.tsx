@@ -159,6 +159,17 @@ const STARS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Background image
+// ---------------------------------------------------------------------------
+// TODO: Replace this URL with the actual Figma export for node 1502:1486.
+// Design source: https://www.figma.com/design/jBrxIgtHbw1anmRkpmgOEu/Weather-App-UI-Design--Community-?node-id=1502-1486
+// To get the correct URL, run (requires a Figma Personal Access Token):
+//   curl -H "X-Figma-Token: $FIGMA_TOKEN" \
+//     "https://api.figma.com/v1/images/jBrxIgtHbw1anmRkpmgOEu?ids=1502-1486&format=png"
+const HOMEPAGE_BG =
+  'https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=430&fit=crop&q=80';
+
+// ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 function HouseIllustration() {
@@ -323,6 +334,33 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
       {/* ================================================================
           BACKGROUND LAYER
       ================================================================ */}
+
+      {/* Homepage background photo (Figma node 1502:1486) */}
+      <img
+        src={HOMEPAGE_BG}
+        alt=""
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          objectPosition: 'center',
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Dark gradient overlay to preserve text readability over the background photo */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'linear-gradient(156deg, rgba(46,51,90,0.82) 0%, rgba(28,27,51,0.88) 100%)',
+          pointerEvents: 'none',
+        }}
+      />
 
       {/* Stars */}
       {STARS.map((star, i) => (
