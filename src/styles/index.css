@@ -39,3 +39,11 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* Reduced motion — disable looping icon animations */
+@media (prefers-reduced-motion: reduce) {
+  .weather-icon-loop * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
