@@ -21,7 +21,10 @@ function AppInner() {
       <div
         className={`screen-slide ${currentScreen === 'search' ? 'screen-visible' : 'screen-enter-right'}`}
       >
-        <WeatherSearchScreen onBack={() => setCurrentScreen('home')} />
+        <WeatherSearchScreen
+          onBack={() => setCurrentScreen('home')}
+          onCitySelect={() => setCurrentScreen('home')}
+        />
       </div>
     </div>
   );
