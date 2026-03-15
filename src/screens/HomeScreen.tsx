@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import ForecastCard from '../components/ForecastCard';
 import WeatherStatWidget from '../components/WeatherStatWidget';
@@ -18,12 +18,12 @@ const tabSlideVariants = {
   center: {
     x: 0,
     opacity: 1,
-    transition: { duration: 0.28, ease: 'easeOut' as const },
+    transition: { duration: 0.28, ease: 'easeOut' },
   },
   exit: (direction: number) => ({
     x: direction > 0 ? -60 : 60,
     opacity: 0,
-    transition: { duration: 0.2, ease: 'easeIn' as const },
+    transition: { duration: 0.2, ease: 'easeIn' },
   }),
 };
 
