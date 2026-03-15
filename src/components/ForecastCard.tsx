@@ -1,3 +1,5 @@
+import WeatherIcon, { type WeatherCondition } from './WeatherIcon';
+
 interface ForecastCardProps {
   /** Time label e.g. "9AM" or day label e.g. "Mon" */
   label: string;
@@ -11,6 +13,8 @@ interface ForecastCardProps {
   isActive?: boolean;
   /** Click handler */
   onClick?: () => void;
+  /** Weather condition for looping icon animation */
+  condition?: WeatherCondition;
 }
 
 /**
@@ -25,6 +29,7 @@ export default function ForecastCard({
   precipitationPercent,
   isActive = false,
   onClick,
+  condition = 'default',
 }: ForecastCardProps) {
   return (
     <button
@@ -32,7 +37,9 @@ export default function ForecastCard({
       style={{
         width: 60,
         borderRadius: 30,
-        background: isActive ? '#48319D' : 'rgba(255, 255, 255, 0.1)',
+        background: isActive
+          ? '#48319D'
+          : 'rgba(255, 255, 255, 0.1)',
         backdropFilter: isActive ? undefined : 'blur(20px)',
         WebkitBackdropFilter: isActive ? undefined : 'blur(20px)',
         border: '1px solid rgba(255, 255, 255, 0.2)',
@@ -62,12 +69,7 @@ export default function ForecastCard({
       </span>
 
       {/* Weather icon */}
-      <img
-        src={icon}
-        alt=""
-        aria-hidden="true"
-        style={{ width: 28, height: 28, objectFit: 'contain' }}
-      />
+      <WeatherIcon src={icon} size={28} condition={condition} iconKey={icon} />
 
       {/* Temperature */}
       <span
@@ -82,7 +84,7 @@ export default function ForecastCard({
       </span>
 
       {/* Precipitation percentage (optional) */}
-      {precipitationPercent !== undefined && precipitationPercent > 0 && (
+      {precipitationPercent !== undefined && (
         <span
           style={{
             fontSize: 11,

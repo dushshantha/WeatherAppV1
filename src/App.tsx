@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import HomeScreen from './screens/HomeScreen';
 import WeatherSearchScreen from './screens/WeatherSearchScreen';
+import { ThemeProvider } from './context/ThemeContext';
 
 type Screen = 'home' | 'search';
 
-function App() {
+function AppInner() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
 
   return (
@@ -23,6 +24,14 @@ function App() {
         <WeatherSearchScreen onBack={() => setCurrentScreen('home')} />
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <ThemeProvider>
+      <AppInner />
+    </ThemeProvider>
   );
 }
 

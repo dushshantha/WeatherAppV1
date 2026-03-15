@@ -198,7 +198,7 @@ export default function WeatherSearchScreen({
           padding: '12px 16px 8px',
         }}
       >
-        {/* Top row: back button + title + ellipsis */}
+        {/* Top row: back button + ellipsis */}
         <div
           style={{
             display: 'flex',
@@ -207,6 +207,7 @@ export default function WeatherSearchScreen({
             marginBottom: 10,
           }}
         >
+          {/* Back button */}
           <button
             onClick={onBack}
             style={{
@@ -228,6 +229,7 @@ export default function WeatherSearchScreen({
             <span>Weather</span>
           </button>
 
+          {/* Ellipsis menu */}
           <button
             style={{
               background: 'none',

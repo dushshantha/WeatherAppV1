@@ -1,11 +1,33 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import ForecastCard from '../components/ForecastCard';
 import WeatherStatWidget from '../components/WeatherStatWidget';
 import type { WeatherStatType } from '../components/WeatherStatWidget';
+import WeatherIcon from '../components/WeatherIcon';
+import type { WeatherCondition } from '../components/WeatherIcon';
+import { useTheme } from '../context/ThemeContext';
 import { useWeather } from '../hooks/useWeather';
 
 type ForecastTab = 'hourly' | 'weekly';
 type TempUnit = 'C' | 'F';
+
+// Slide variants for tab content transition
+const tabSlideVariants = {
+  enter: (direction: number) => ({
+    x: direction > 0 ? 60 : -60,
+    opacity: 0,
+  }),
+  center: {
+    x: 0,
+    opacity: 1,
+    transition: { duration: 0.28, ease: 'easeOut' },
+  },
+  exit: (direction: number) => ({
+    x: direction > 0 ? -60 : 60,
+    opacity: 0,
+    transition: { duration: 0.2, ease: 'easeIn' },
+  }),
+};
 
 // ---------------------------------------------------------------------------
 // Temperature / display helpers
@@ -30,6 +52,13 @@ function windDegToCompass(deg: number): string {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function conditionIdToWeatherCondition(id: number): WeatherCondition {
+  if (id >= 200 && id < 600) return 'rain';
+  if (id >= 700 && id < 800) return 'wind';
+  if (id === 800) return 'sun';
+  return 'default';
 }
 
 // ---------------------------------------------------------------------------
@@ -82,31 +111,31 @@ function conditionIdToIcon(id: number, iconCode: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Static fallback forecast data
+// Forecast data (with WeatherCondition for animated icons)
 // ---------------------------------------------------------------------------
-const hourlyData: Array<{ label: string; temp: string; precip?: number; icon: string }> = [
-  { label: '12AM', temp: '19°', precip: 20, icon: ICONS.moonCloud  },
-  { label: '1AM',  temp: '18°', precip: 15, icon: ICONS.moonCloud  },
-  { label: '2AM',  temp: '17°', precip: 25, icon: ICONS.cloudRain  },
-  { label: '3AM',  temp: '16°', precip: 35, icon: ICONS.rain       },
-  { label: '4AM',  temp: '16°', precip: 30, icon: ICONS.rain       },
-  { label: '5AM',  temp: '15°', precip: 15, icon: ICONS.wind       },
-  { label: '6AM',  temp: '16°', precip: 5,  icon: ICONS.sunCloud   },
-  { label: '7AM',  temp: '17°',             icon: ICONS.sunCloud   },
+const hourlyData: Array<{ label: string; temp: string; precip?: number; icon: string; condition: WeatherCondition }> = [
+  { label: '12AM', temp: '19°', precip: 20, icon: ICONS.moonCloud,  condition: 'default' },
+  { label: '1AM',  temp: '18°', precip: 15, icon: ICONS.moonCloud,  condition: 'default' },
+  { label: '2AM',  temp: '17°', precip: 25, icon: ICONS.cloudRain,  condition: 'rain'    },
+  { label: '3AM',  temp: '16°', precip: 35, icon: ICONS.rain,       condition: 'rain'    },
+  { label: '4AM',  temp: '16°', precip: 30, icon: ICONS.rain,       condition: 'rain'    },
+  { label: '5AM',  temp: '15°', precip: 15, icon: ICONS.wind,       condition: 'wind'    },
+  { label: '6AM',  temp: '16°', precip: 5,  icon: ICONS.sunCloud,   condition: 'sun'     },
+  { label: '7AM',  temp: '17°',             icon: ICONS.sunCloud,   condition: 'sun'     },
 ];
 
-const weeklyData: Array<{ label: string; temp: string; precip?: number; icon: string }> = [
-  { label: 'MON', temp: '19°', precip: 20, icon: ICONS.cloudRain },
-  { label: 'TUE', temp: '21°', precip: 10, icon: ICONS.moonCloud },
-  { label: 'WED', temp: '23°', precip: 5,  icon: ICONS.sunCloud  },
-  { label: 'THU', temp: '18°', precip: 45, icon: ICONS.rain      },
-  { label: 'FRI', temp: '16°', precip: 60, icon: ICONS.rain      },
-  { label: 'SAT', temp: '20°', precip: 15, icon: ICONS.wind      },
-  { label: 'SUN', temp: '22°',             icon: ICONS.sunCloud  },
+const weeklyData: Array<{ label: string; temp: string; precip?: number; icon: string; condition: WeatherCondition }> = [
+  { label: 'MON', temp: '19°', precip: 20, icon: ICONS.cloudRain, condition: 'rain'    },
+  { label: 'TUE', temp: '21°', precip: 10, icon: ICONS.moonCloud, condition: 'default' },
+  { label: 'WED', temp: '23°', precip: 5,  icon: ICONS.sunCloud,  condition: 'sun'     },
+  { label: 'THU', temp: '18°', precip: 45, icon: ICONS.rain,      condition: 'rain'    },
+  { label: 'FRI', temp: '16°', precip: 60, icon: ICONS.rain,      condition: 'rain'    },
+  { label: 'SAT', temp: '20°', precip: 15, icon: ICONS.wind,      condition: 'wind'    },
+  { label: 'SUN', temp: '22°',             icon: ICONS.sunCloud,  condition: 'sun'     },
 ];
 
 // ---------------------------------------------------------------------------
-// Pre-computed star positions
+// Pre-computed star positions (avoids Math.random in render)
 // ---------------------------------------------------------------------------
 const STARS = [
   { top: 4,  left: 12, size: 1.5, opacity: 0.7 },
@@ -142,22 +171,29 @@ function HouseIllustration() {
       xmlns="http://www.w3.org/2000/svg"
       aria-hidden="true"
     >
+      {/* Ground shadow */}
       <ellipse cx="140" cy="132" rx="100" ry="7" fill="rgba(0,0,0,0.25)" />
+      {/* House body */}
       <rect x="60" y="60" width="160" height="72" rx="3"
         fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.14)" strokeWidth="1" />
+      {/* Roof */}
       <path d="M44 61 L140 15 L236 61Z"
         fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.18)"
         strokeWidth="1" strokeLinejoin="round" />
+      {/* Chimney */}
       <rect x="183" y="30" width="16" height="30"
         fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.14)" strokeWidth="1" />
+      {/* Left window */}
       <rect x="72" y="72" width="42" height="30" rx="3"
         fill="rgba(255,230,100,0.10)" stroke="rgba(255,255,255,0.18)" strokeWidth="1" />
       <line x1="93" y1="72" x2="93" y2="102" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
       <line x1="72" y1="87" x2="114" y2="87" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
+      {/* Right window */}
       <rect x="166" y="72" width="42" height="30" rx="3"
         fill="rgba(255,230,100,0.10)" stroke="rgba(255,255,255,0.18)" strokeWidth="1" />
       <line x1="187" y1="72" x2="187" y2="102" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
       <line x1="166" y1="87" x2="208" y2="87" stroke="rgba(255,255,255,0.12)" strokeWidth="0.5" />
+      {/* Door */}
       <rect x="114" y="92" width="52" height="40" rx="3"
         fill="rgba(255,255,255,0.09)" stroke="rgba(255,255,255,0.18)" strokeWidth="1" />
       <circle cx="154" cy="114" r="2.5" fill="rgba(255,255,255,0.28)" />
@@ -202,10 +238,12 @@ interface HomeScreenProps {
 
 export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
   const [activeTab, setActiveTab] = useState<ForecastTab>('hourly');
+  const [tabDirection, setTabDirection] = useState(0);
   const [activeHourlyCard, setActiveHourlyCard] = useState(0);
   const [activeWeeklyCard, setActiveWeeklyCard] = useState(0);
   const [tempUnit, setTempUnit] = useState<TempUnit>('C');
 
+  const { theme, toggleTheme } = useTheme();
   const { data, loading, error, usingMockData } = useWeather('Montreal');
   const current = data?.current;
 
@@ -215,6 +253,7 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
     temp: toDisplayTemp(h.tempC, tempUnit),
     precip: h.precipPercent,
     icon: conditionIdToIcon(h.conditionId, h.iconCode),
+    condition: conditionIdToWeatherCondition(h.conditionId),
   })) ?? hourlyData;
 
   const liveWeekly = data?.daily.map((d) => ({
@@ -222,11 +261,18 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
     temp: toDisplayTemp(d.tempC, tempUnit),
     precip: d.precipPercent,
     icon: conditionIdToIcon(d.conditionId, d.iconCode),
+    condition: conditionIdToWeatherCondition(d.conditionId),
   })) ?? weeklyData;
 
   const forecastData = activeTab === 'hourly' ? liveHourly : liveWeekly;
   const activeCard = activeTab === 'hourly' ? activeHourlyCard : activeWeeklyCard;
   const setActiveCard = activeTab === 'hourly' ? setActiveHourlyCard : setActiveWeeklyCard;
+
+  function switchTab(tab: ForecastTab) {
+    if (tab === activeTab) return;
+    setTabDirection(tab === 'weekly' ? 1 : -1);
+    setActiveTab(tab);
+  }
 
   const statWidgets: Array<{ type: WeatherStatType; value: string; description?: string }> = current
     ? [
@@ -260,7 +306,7 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
         minHeight: 700,
         margin: '0 auto',
         overflow: 'hidden',
-        background: 'linear-gradient(156deg, #2E335A 0%, #1C1B33 100%)',
+        background: 'var(--gradient-bg)',
         fontFamily:
           '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif',
       }}
@@ -278,6 +324,7 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
           BACKGROUND LAYER
       ================================================================ */}
 
+      {/* Stars */}
       {STARS.map((star, i) => (
         <div
           key={i}
@@ -295,18 +342,23 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
         />
       ))}
 
+      {/* Decorative blur ellipse — top-left purple glow */}
       <div style={{
         position: 'absolute', top: -100, left: -80, width: 380, height: 380,
         borderRadius: '50%',
         background: 'radial-gradient(ellipse, rgba(100,80,210,0.55) 0%, transparent 65%)',
         filter: 'blur(24px)', pointerEvents: 'none',
       }} />
+
+      {/* Decorative blur ellipse — right-center cyan glow */}
       <div style={{
         position: 'absolute', top: 220, right: -90, width: 280, height: 280,
         borderRadius: '50%',
         background: 'radial-gradient(ellipse, rgba(64,203,216,0.22) 0%, transparent 70%)',
         filter: 'blur(32px)', pointerEvents: 'none',
       }} />
+
+      {/* Decorative blur ellipse — bottom subtle */}
       <div style={{
         position: 'absolute', bottom: 100, left: '20%', width: 200, height: 200,
         borderRadius: '50%',
@@ -315,7 +367,7 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
       }} />
 
       {/* ================================================================
-          C/F TOGGLE — top-right
+          TOP-RIGHT CONTROLS — theme toggle + C/F unit toggle
       ================================================================ */}
       <div
         style={{
@@ -325,33 +377,77 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
           zIndex: 30,
           display: 'flex',
           alignItems: 'center',
-          background: 'rgba(255,255,255,0.1)',
-          borderRadius: 20,
-          border: '1px solid rgba(255,255,255,0.18)',
-          overflow: 'hidden',
+          gap: 8,
         }}
       >
-        {(['C', 'F'] as TempUnit[]).map((unit) => (
-          <button
-            key={unit}
-            onClick={() => setTempUnit(unit)}
-            style={{
-              width: 36,
-              height: 30,
-              background: tempUnit === unit ? 'rgba(255,255,255,0.22)' : 'none',
-              border: 'none',
-              color: tempUnit === unit ? '#FFFFFF' : 'rgba(235,235,245,0.45)',
-              fontSize: 13,
-              fontWeight: tempUnit === unit ? 700 : 400,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-              transition: 'background 200ms ease, color 200ms ease',
-            }}
-            aria-label={`Switch to ${unit === 'C' ? 'Celsius' : 'Fahrenheit'}`}
-          >
-            °{unit}
-          </button>
-        ))}
+        {/* Theme toggle button */}
+        <button
+          onClick={toggleTheme}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            background: 'var(--glass-bg)',
+            backdropFilter: 'var(--glass-blur-sm)',
+            WebkitBackdropFilter: 'var(--glass-blur-sm)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-shadow)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'background 0.2s ease, transform 0.2s ease',
+            padding: 0,
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}
+        >
+          {theme === 'dark' ? (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="12" cy="12" r="5" stroke="white" strokeWidth="2" />
+              <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="white" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" stroke="rgba(26,26,46,0.8)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
+        </button>
+
+        {/* C/F temperature unit toggle */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            background: 'rgba(255,255,255,0.1)',
+            borderRadius: 20,
+            border: '1px solid rgba(255,255,255,0.18)',
+            overflow: 'hidden',
+          }}
+        >
+          {(['C', 'F'] as TempUnit[]).map((unit) => (
+            <button
+              key={unit}
+              onClick={() => setTempUnit(unit)}
+              style={{
+                width: 36,
+                height: 30,
+                background: tempUnit === unit ? 'rgba(255,255,255,0.22)' : 'none',
+                border: 'none',
+                color: tempUnit === unit ? '#FFFFFF' : 'rgba(235,235,245,0.45)',
+                fontSize: 13,
+                fontWeight: tempUnit === unit ? 700 : 400,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                transition: 'background 200ms ease, color 200ms ease',
+              }}
+              aria-label={`Switch to ${unit === 'C' ? 'Celsius' : 'Fahrenheit'}`}
+            >
+              {`°${unit}`}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ================================================================
@@ -404,7 +500,7 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
           <>
             {/* City name */}
             <div style={{
-              fontSize: 28, fontWeight: 600, color: '#FFFFFF',
+              fontSize: 28, fontWeight: 600, color: 'var(--color-text-primary)',
               letterSpacing: '-0.5px', lineHeight: 1.2,
             }}>
               {current?.city ?? 'Montreal'}
@@ -412,7 +508,7 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
 
             {/* Temperature */}
             <div style={{
-              fontSize: 96, fontWeight: 200, color: '#FFFFFF',
+              fontSize: 96, fontWeight: 200, color: 'var(--color-text-primary)',
               lineHeight: 1, letterSpacing: '-4px', margin: '4px 0 2px',
             }}>
               {current ? toDisplayTemp(current.tempC, tempUnit) : '19°'}
@@ -421,15 +517,25 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
             {/* Condition */}
             <div style={{
               fontSize: 17, fontWeight: 400,
-              color: 'rgba(235,235,245,0.6)', lineHeight: 1.3,
+              color: 'var(--color-text-secondary)', lineHeight: 1.3,
             }}>
               {current ? capitalize(current.condition) : 'Partly Cloudy'}
+            </div>
+
+            {/* Hero weather icon */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+              <WeatherIcon
+                src={ICONS.sunCloud}
+                size={64}
+                condition="sun"
+                iconKey="hero"
+              />
             </div>
 
             {/* H / L range */}
             <div style={{
               fontSize: 15, fontWeight: 400,
-              color: 'rgba(235,235,245,0.6)', marginTop: 6, letterSpacing: '0.02em',
+              color: 'var(--color-text-secondary)', marginTop: 6, letterSpacing: '0.02em',
             }}>
               {current
                 ? `H:${toDisplayTemp(current.tempMaxC, tempUnit)}   L:${toDisplayTemp(current.tempMinC, tempUnit)}`
@@ -453,12 +559,16 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
       </div>
 
       {/* ================================================================
-          HOUSE ILLUSTRATION
+          HOUSE ILLUSTRATION  (positioned at y:304)
       ================================================================ */}
       <div
         style={{
-          position: 'absolute', top: 304, left: '50%',
-          transform: 'translateX(-50%)', zIndex: 2, pointerEvents: 'none',
+          position: 'absolute',
+          top: 304,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 2,
+          pointerEvents: 'none',
         }}
       >
         <HouseIllustration />
@@ -503,7 +613,7 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
           }}
         >
           <button
-            onClick={() => setActiveTab('hourly')}
+            onClick={() => switchTab('hourly')}
             style={{
               flex: 1, padding: '13px 0', fontSize: 15,
               fontWeight: activeTab === 'hourly' ? 600 : 400,
@@ -516,7 +626,7 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
           </button>
 
           <button
-            onClick={() => setActiveTab('weekly')}
+            onClick={() => switchTab('weekly')}
             style={{
               flex: 1, padding: '13px 0', fontSize: 15,
               fontWeight: activeTab === 'weekly' ? 600 : 400,
@@ -542,24 +652,37 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
         </div>
 
         {/* ── HORIZONTALLY SCROLLABLE FORECAST CARDS ────────────── */}
-        <div
-          className="scrollbar-hide"
-          style={{
-            display: 'flex', gap: 8, overflowX: 'auto',
-            padding: '16px 20px 12px', flexShrink: 0,
-          }}
-        >
-          {forecastData.map((item, i) => (
-            <ForecastCard
-              key={item.label}
-              label={item.label}
-              icon={item.icon}
-              temperature={item.temp}
-              precipitationPercent={item.precip}
-              isActive={i === activeCard}
-              onClick={() => setActiveCard(i)}
-            />
-          ))}
+        <div style={{ position: 'relative', flexShrink: 0, overflow: 'hidden' }}>
+          <AnimatePresence mode="wait" custom={tabDirection}>
+            <motion.div
+              key={activeTab}
+              custom={tabDirection}
+              variants={tabSlideVariants}
+              initial="enter"
+              animate="center"
+              exit="exit"
+              className="scrollbar-hide"
+              style={{
+                display: 'flex',
+                gap: 8,
+                overflowX: 'auto',
+                padding: '16px 20px 12px',
+              }}
+            >
+              {forecastData.map((item, i) => (
+                <ForecastCard
+                  key={item.label}
+                  label={item.label}
+                  icon={item.icon}
+                  temperature={item.temp}
+                  precipitationPercent={item.precip}
+                  isActive={i === activeCard}
+                  onClick={() => setActiveCard(i)}
+                  condition={item.condition}
+                />
+              ))}
+            </motion.div>
+          </AnimatePresence>
         </div>
 
         {/* Divider */}
@@ -625,6 +748,7 @@ export default function HomeScreen({ onNavigateToSearch }: HomeScreenProps) {
           </div>
         </div>
 
+        {/* Bottom padding so content clears the tab bar */}
         <div style={{ height: 84, flexShrink: 0 }} />
       </div>
 
