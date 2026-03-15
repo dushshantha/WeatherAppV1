@@ -6,16 +6,8 @@ import {
   hasApiKey,
   normalizeCurrentWeather,
 } from '../services/weatherApi';
-
-interface CityData {
-  city: string;
-  country: string;
-  temperature: string;
-  condition: string;
-  high: string;
-  low: string;
-  icon: string;
-}
+import { useSavedCities } from '../hooks/useSavedCities';
+import type { CityData } from '../hooks/useSavedCities';
 
 const ALL_CITIES: CityData[] = [
   {
@@ -99,6 +91,8 @@ export default function WeatherSearchScreen({
   const [searchResult, setSearchResult] = useState<CityData | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
 
+  const { savedCities, addCity, removeCity, isSaved } = useSavedCities();
+
   async function handleSearch() {
     const trimmed = query.trim();
     if (!trimmed) return;
@@ -145,6 +139,9 @@ export default function WeatherSearchScreen({
         c.country.toLowerCase().includes(query.toLowerCase())
       )
     : ALL_CITIES;
+
+  // Only show unsaved cities in the browse section to avoid duplication
+  const unsavedFilteredCities = filteredCities.filter((c) => !isSaved(c.city));
 
   return (
     <div
@@ -336,12 +333,85 @@ export default function WeatherSearchScreen({
           gap: 16,
         }}
       >
+        {/* ── SAVED CITIES SECTION ── */}
+        {!showLiveResult && (
+          <>
+            <div
+              style={{
+                width: 342,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 17,
+                  fontWeight: 600,
+                  color: 'rgba(235, 235, 245, 0.9)',
+                  letterSpacing: '-0.2px',
+                }}
+              >
+                Saved Cities
+              </span>
+              {savedCities.length > 0 && (
+                <span style={{ fontSize: 13, color: 'rgba(235, 235, 245, 0.4)' }}>
+                  {savedCities.length}/10
+                </span>
+              )}
+            </div>
+
+            {savedCities.length === 0 ? (
+              <p
+                style={{
+                  width: 342,
+                  color: 'rgba(235, 235, 245, 0.4)',
+                  fontSize: 15,
+                  textAlign: 'center',
+                  margin: '8px 0',
+                }}
+              >
+                Search for a city to save it here
+              </p>
+            ) : (
+              savedCities.map((cityData) => (
+                <WeatherCityCard
+                  key={cityData.city}
+                  city={cityData.city}
+                  country={cityData.country}
+                  temperature={cityData.temperature}
+                  condition={cityData.condition}
+                  high={cityData.high}
+                  low={cityData.low}
+                  icon={cityData.icon}
+                  onClick={() => onCitySelect?.(cityData)}
+                  isBookmarked={true}
+                  onBookmark={() => removeCity(cityData.city)}
+                  onRemove={() => removeCity(cityData.city)}
+                />
+              ))
+            )}
+          </>
+        )}
+
+        {/* Divider between saved and browse sections */}
+        {!showLiveResult && savedCities.length > 0 && unsavedFilteredCities.length > 0 && (
+          <div
+            style={{
+              width: 342,
+              height: 1,
+              background: 'rgba(255, 255, 255, 0.1)',
+            }}
+          />
+        )}
+
         {searching && (
           <p style={{ marginTop: 24, color: 'rgba(235,235,245,0.6)', fontSize: 15 }}>
             Searching…
           </p>
         )}
 
+        {/* ── LIVE SEARCH RESULT ── */}
         {!searching && showLiveResult && searchResult && (
           <WeatherCityCard
             city={searchResult.city}
@@ -352,6 +422,12 @@ export default function WeatherSearchScreen({
             low={searchResult.low}
             icon={searchResult.icon}
             onClick={() => onCitySelect?.(searchResult)}
+            isBookmarked={isSaved(searchResult.city)}
+            onBookmark={() =>
+              isSaved(searchResult.city)
+                ? removeCity(searchResult.city)
+                : addCity(searchResult)
+            }
           />
         )}
 
@@ -361,8 +437,9 @@ export default function WeatherSearchScreen({
           </p>
         )}
 
+        {/* ── ALL CITIES (unsaved only, to avoid duplication) ── */}
         {!searching && !showLiveResult && !searchError && (
-          filteredCities.length === 0 ? (
+          unsavedFilteredCities.length === 0 && query.trim() ? (
             <p style={{
               marginTop: 48,
               color: 'rgba(235, 235, 245, 0.4)',
@@ -372,7 +449,7 @@ export default function WeatherSearchScreen({
               No results for &ldquo;{query}&rdquo;
             </p>
           ) : (
-            filteredCities.map((cityData) => (
+            unsavedFilteredCities.map((cityData) => (
               <WeatherCityCard
                 key={cityData.city}
                 city={cityData.city}
@@ -383,6 +460,8 @@ export default function WeatherSearchScreen({
                 low={cityData.low}
                 icon={cityData.icon}
                 onClick={() => onCitySelect?.(cityData)}
+                isBookmarked={false}
+                onBookmark={() => addCity(cityData)}
               />
             ))
           )
