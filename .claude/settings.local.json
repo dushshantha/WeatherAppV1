@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Read(*)",
+      "mcp__multiclaude-worker__get_my_task",
+      "mcp__multiclaude-worker__report_progress",
+      "mcp__multiclaude-worker__report_done",
+      "mcp__multiclaude-worker__report_blocked"
+    ]
+  }
+}
