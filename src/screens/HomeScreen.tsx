@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import ForecastCard from '../components/ForecastCard';
 import WeatherStatWidget from '../components/WeatherStatWidget';
@@ -12,6 +12,7 @@ import { useGeolocation } from '../hooks/useGeolocation';
 import { useNotifications } from '../hooks/useNotifications';
 import { fetchWeatherAlerts, reverseGeocode } from '../services/weatherApi';
 import type { WeatherAlert } from '../types/weather';
+import { usePullToRefresh } from '../hooks/usePullToRefresh';
 
 type ForecastTab = 'hourly' | 'weekly';
 type TempUnit = 'C' | 'F';
@@ -38,6 +39,15 @@ function windDegToCompass(deg: number): string {
 }
 
 function capitalize(s: string): string { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function formatRelativeTime(date: Date): string {
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return 'Updated just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `Updated ${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  return `Updated ${hours}h ago`;
+}
 
 function conditionIdToWeatherCondition(id: number): WeatherCondition {
   if (id >= 200 && id < 600) return 'rain';
@@ -160,13 +170,18 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
   const [alerts, setAlerts] = useState<WeatherAlert[]>([]);
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const prevAlertEventsRef = useRef<string[]>([]);
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [lastUpdatedLabel, setLastUpdatedLabel] = useState('Updated just now');
+  const [showToast, setShowToast] = useState(false);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { theme, toggleTheme } = useTheme();
-  const { data, loading, error, usingMockData } = useWeather(city);
+  const { data, loading, error, usingMockData, refetch } = useWeather(city);
   const geo = useGeolocation();
   const { supported: notifSupported, optedIn, requestPermission, sendNotification } = useNotifications();
   const current = data?.current;
 
+  // When geolocation coords arrive, reverse geocode to get city name
   useEffect(() => {
     if (geo.lat !== null && geo.lon !== null) {
       reverseGeocode(geo.lat, geo.lon)
@@ -180,7 +195,9 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
           setCoords({ lat: geo.lat!, lon: geo.lon! });
         });
     }
-    if (geo.error) setGeoError(geo.error);
+    if (geo.error) {
+      setGeoError(geo.error);
+    }
   }, [geo.lat, geo.lon, geo.error]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -198,6 +215,31 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
     prevAlertEventsRef.current = currentEvents;
   }, [alerts, optedIn, sendNotification]);
 
+  // Update relative timestamp every 30s
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setLastUpdatedLabel(formatRelativeTime(lastUpdated));
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [lastUpdated]);
+
+  const handleRefresh = useCallback(async () => {
+    await refetch();
+    const now = new Date();
+    setLastUpdated(now);
+    setLastUpdatedLabel(formatRelativeTime(now));
+
+    // Show 'Updated ✓' toast
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setShowToast(true);
+    toastTimerRef.current = setTimeout(() => setShowToast(false), 1800);
+  }, [refetch]);
+
+  const { isPulling, pullDistance, isRefreshing, handlers } = usePullToRefresh({
+    onRefresh: handleRefresh,
+  });
+
+  // Build display-ready forecast arrays from live data (or fall back to static)
   const liveHourly = data?.hourly.map((h) => ({
     label: h.label, temp: toDisplayTemp(h.tempC, tempUnit), precip: h.precipPercent,
     icon: conditionIdToIcon(h.conditionId, h.iconCode), condition: conditionIdToWeatherCondition(h.conditionId),
@@ -243,7 +285,18 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
   return (
     <div style={{ position: 'relative', width: '100%', maxWidth: 430, height: '100svh', minHeight: 700, margin: '0 auto', overflow: 'hidden', background: 'var(--gradient-bg)', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif' }}>
       <style>{`
-        @keyframes skeletonPulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.65; } }
+        @keyframes skeletonPulse {
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 0.65; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes pullSpinnerRotate {
+          from { transform: scale(1) rotate(0deg); }
+          to   { transform: scale(1) rotate(360deg); }
+        }
         .scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
       `}</style>
@@ -264,8 +317,123 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
         {alerts.length > 0 && <AlertBanner alerts={alerts} />}
       </AnimatePresence>
 
-      {/* Top-right controls */}
-      <div style={{ position: 'absolute', top: 16, right: 16, zIndex: 30, display: 'flex', alignItems: 'center', gap: 8 }}>
+      {/* Decorative blur ellipse — bottom subtle */}
+      <div style={{
+        position: 'absolute', bottom: 100, left: '20%', width: 200, height: 200,
+        borderRadius: '50%',
+        background: 'radial-gradient(ellipse, rgba(72,49,157,0.18) 0%, transparent 70%)',
+        filter: 'blur(40px)', pointerEvents: 'none',
+      }} />
+
+      {/* ================================================================
+          TOAST — 'Updated ✓'
+      ================================================================ */}
+      <AnimatePresence>
+        {showToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0, transition: { duration: 0.3, ease: 'easeOut' } }}
+            exit={{ opacity: 0, y: -8, transition: { duration: 0.3, ease: 'easeIn' } }}
+            style={{
+              position: 'absolute',
+              top: 56,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: 50,
+              background: 'rgba(40, 200, 130, 0.92)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              borderRadius: 20,
+              padding: '6px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#fff',
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+            }}
+          >
+            Updated ✓
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ================================================================
+          TOP-LEFT CONTROLS — desktop refresh button
+      ================================================================ */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          left: 16,
+          zIndex: 30,
+        }}
+      >
+        <button
+          onClick={handleRefresh}
+          aria-label="Refresh weather"
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            background: 'var(--glass-bg)',
+            backdropFilter: 'var(--glass-blur-sm)',
+            WebkitBackdropFilter: 'var(--glass-blur-sm)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-shadow)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'background 0.2s ease, transform 0.2s ease',
+            padding: 0,
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+            style={{
+              transition: 'transform 0.5s ease',
+              transform: isRefreshing ? 'rotate(360deg)' : 'rotate(0deg)',
+            }}
+          >
+            <path
+              d="M1 4v6h6M23 20v-6h-6"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <path
+              d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"
+              stroke="white"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+      </div>
+
+      {/* ================================================================
+          TOP-RIGHT CONTROLS — notification bell + theme toggle + C/F unit toggle
+      ================================================================ */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          zIndex: 30,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}
+      >
+        {/* Notification bell button */}
         {notifSupported && (
           <button
             onClick={requestPermission}
@@ -279,7 +447,29 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
             </svg>
           </button>
         )}
-        <button onClick={toggleTheme} aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'} style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--glass-bg)', backdropFilter: 'var(--glass-blur-sm)', WebkitBackdropFilter: 'var(--glass-blur-sm)', border: '1px solid var(--glass-border)', boxShadow: 'var(--glass-shadow)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'background 0.2s ease, transform 0.2s ease', padding: 0 }} onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)'; }} onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}>
+        {/* Theme toggle button */}
+        <button
+          onClick={toggleTheme}
+          aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            background: 'var(--glass-bg)',
+            backdropFilter: 'var(--glass-blur-sm)',
+            WebkitBackdropFilter: 'var(--glass-blur-sm)',
+            border: '1px solid var(--glass-border)',
+            boxShadow: 'var(--glass-shadow)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'background 0.2s ease, transform 0.2s ease',
+            padding: 0,
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.1)'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)'; }}
+        >
           {theme === 'dark' ? (
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="5" stroke="white" strokeWidth="2" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke="white" strokeWidth="2" strokeLinecap="round" /></svg>
           ) : (
@@ -309,24 +499,252 @@ export default function HomeScreen({ city = 'Montreal', onCityChange, onNavigate
           </div>
         ) : (
           <>
-            <div style={{ fontSize: 28, fontWeight: 600, color: 'var(--color-text-primary)', letterSpacing: '-0.5px', lineHeight: 1.2 }}>{current?.city ?? 'Montreal'}</div>
-            <div style={{ fontSize: 96, fontWeight: 200, color: 'var(--color-text-primary)', lineHeight: 1, letterSpacing: '-4px', margin: '4px 0 2px' }}>{current ? toDisplayTemp(current.tempC, tempUnit) : '19°'}</div>
-            <div style={{ fontSize: 17, fontWeight: 400, color: 'var(--color-text-secondary)', lineHeight: 1.3 }}>{current ? capitalize(current.condition) : 'Partly Cloudy'}</div>
-            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}><WeatherIcon src={ICONS.sunCloud} size={64} condition="sun" iconKey="hero" /></div>
-            <div style={{ fontSize: 15, fontWeight: 400, color: 'var(--color-text-secondary)', marginTop: 6, letterSpacing: '0.02em' }}>{current ? `H:${toDisplayTemp(current.tempMaxC, tempUnit)}   L:${toDisplayTemp(current.tempMinC, tempUnit)}` : 'H:24°   L:18°'}</div>
-            {usingMockData && <div style={{ display: 'inline-block', marginTop: 6, padding: '3px 10px', borderRadius: 12, background: 'rgba(255,200,50,0.12)', border: '1px solid rgba(255,200,50,0.2)', fontSize: 11, color: 'rgba(255,220,100,0.85)' }}>{error ? 'Offline — sample data' : 'Demo mode'}</div>}
+            {/* City name + Use my location button */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <div style={{
+                fontSize: 28, fontWeight: 600, color: 'var(--color-text-primary)',
+                letterSpacing: '-0.5px', lineHeight: 1.2,
+              }}>
+                {current?.city ?? city}
+              </div>
+              <button
+                onClick={() => { setGeoError(null); geo.getLocation(); }}
+                disabled={geo.loading}
+                aria-label="Use my location"
+                title="Use my location"
+                style={{
+                  pointerEvents: 'auto',
+                  background: 'rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.18)',
+                  borderRadius: '50%',
+                  width: 28,
+                  height: 28,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: geo.loading ? 'default' : 'pointer',
+                  opacity: geo.loading ? 0.5 : 1,
+                  transition: 'opacity 0.2s',
+                  flexShrink: 0,
+                  padding: 0,
+                  marginTop: 2,
+                }}
+              >
+                {geo.loading ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+                    style={{ animation: 'spin 1s linear infinite' }}>
+                    <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.35)" strokeWidth="2.5" />
+                    <path d="M12 3a9 9 0 0 1 9 9" stroke="white" strokeWidth="2.5" strokeLinecap="round" />
+                  </svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4" fill="white" />
+                    <circle cx="12" cy="12" r="8" stroke="white" strokeWidth="2" fill="none" />
+                    <line x1="12" y1="2" x2="12" y2="4" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                    <line x1="12" y1="20" x2="12" y2="22" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                    <line x1="2" y1="12" x2="4" y2="12" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                    <line x1="20" y1="12" x2="22" y2="12" stroke="white" strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                )}
+              </button>
+            </div>
+
+            {/* Geolocation error */}
+            {geoError && (
+              <div style={{
+                marginTop: 4,
+                padding: '4px 12px',
+                borderRadius: 8,
+                background: 'rgba(200,50,50,0.18)',
+                border: '1px solid rgba(200,80,80,0.3)',
+                fontSize: 11,
+                color: 'rgba(255,160,160,0.95)',
+                maxWidth: 240,
+                margin: '4px auto 0',
+                lineHeight: 1.4,
+                pointerEvents: 'auto',
+              }}>
+                {geoError}
+              </div>
+            )}
+
+            {/* Temperature */}
+            <div style={{
+              fontSize: 96, fontWeight: 200, color: 'var(--color-text-primary)',
+              lineHeight: 1, letterSpacing: '-4px', margin: '4px 0 2px',
+            }}>
+              {current ? toDisplayTemp(current.tempC, tempUnit) : '19°'}
+            </div>
+
+            {/* Condition */}
+            <div style={{
+              fontSize: 17, fontWeight: 400,
+              color: 'var(--color-text-secondary)', lineHeight: 1.3,
+            }}>
+              {current ? capitalize(current.condition) : 'Partly Cloudy'}
+            </div>
+
+            {/* Hero weather icon */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+              <WeatherIcon
+                src={ICONS.sunCloud}
+                size={64}
+                condition="sun"
+                iconKey="hero"
+              />
+            </div>
+
+            {/* H / L range */}
+            <div style={{
+              fontSize: 15, fontWeight: 400,
+              color: 'var(--color-text-secondary)', marginTop: 6, letterSpacing: '0.02em',
+            }}>
+              {current
+                ? `H:${toDisplayTemp(current.tempMaxC, tempUnit)}   L:${toDisplayTemp(current.tempMinC, tempUnit)}`
+                : 'H:24°   L:18°'}
+            </div>
+
+            {/* Demo badge */}
+            {usingMockData && (
+              <div style={{
+                display: 'inline-block', marginTop: 6,
+                padding: '3px 10px', borderRadius: 12,
+                background: 'rgba(255,200,50,0.12)',
+                border: '1px solid rgba(255,200,50,0.2)',
+                fontSize: 11, color: 'rgba(255,220,100,0.85)',
+              }}>
+                {error ? 'Offline — sample data' : 'Demo mode'}
+              </div>
+            )}
           </>
         )}
       </div>
 
       <div style={{ position: 'absolute', top: 304, left: '50%', transform: 'translateX(-50%)', zIndex: 2, pointerEvents: 'none' }}><HouseIllustration /></div>
 
-      <div style={{ position: 'absolute', top: 519, left: 0, right: 0, bottom: 0, borderRadius: '44px 44px 0 0', background: 'rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)', border: '1px solid rgba(255, 255, 255, 0.14)', borderBottom: 'none', display: 'flex', flexDirection: 'column', overflowY: 'auto', zIndex: 10 }} className="scrollbar-hide">
-        <div style={{ width: 36, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.28)', margin: '10px auto 0', flexShrink: 0 }} />
-        <div style={{ position: 'relative', display: 'flex', marginTop: 6, borderBottom: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
-          <button onClick={() => switchTab('hourly')} style={{ flex: 1, padding: '13px 0', fontSize: 15, fontWeight: activeTab === 'hourly' ? 600 : 400, color: activeTab === 'hourly' ? '#FFFFFF' : 'rgba(235,235,245,0.4)', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 250ms ease', fontFamily: 'inherit' }}>Hourly Forecast</button>
-          <button onClick={() => switchTab('weekly')} style={{ flex: 1, padding: '13px 0', fontSize: 15, fontWeight: activeTab === 'weekly' ? 600 : 400, color: activeTab === 'weekly' ? '#FFFFFF' : 'rgba(235,235,245,0.4)', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 250ms ease', fontFamily: 'inherit' }}>Weekly Forecast</button>
-          <div style={{ position: 'absolute', bottom: -1, left: activeTab === 'hourly' ? '0%' : '50%', width: '50%', height: 3, background: 'rgba(255,255,255,0.9)', borderRadius: '2px 2px 0 0', transition: 'left 260ms cubic-bezier(0.4, 0, 0.2, 1)' }} />
+      {/* ================================================================
+          BOTTOM GLASSMORPHISM SHEET  (from y:519)
+      ================================================================ */}
+      <div
+        {...handlers}
+        style={{
+          position: 'absolute',
+          top: 519,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          borderRadius: '44px 44px 0 0',
+          background: 'rgba(255, 255, 255, 0.08)',
+          backdropFilter: 'blur(40px)',
+          WebkitBackdropFilter: 'blur(40px)',
+          border: '1px solid rgba(255, 255, 255, 0.14)',
+          borderBottom: 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          overflowY: 'auto',
+          zIndex: 10,
+        }}
+        className="scrollbar-hide"
+      >
+        {/* Pull-to-refresh indicator */}
+        {(isPulling || isRefreshing) && (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              height: isRefreshing ? 48 : Math.max(pullDistance, 8),
+              zIndex: 5,
+              pointerEvents: 'none',
+              overflow: 'hidden',
+              transition: isRefreshing ? 'height 0.2s ease' : undefined,
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                border: '2.5px solid rgba(255,255,255,0.2)',
+                borderTopColor: 'rgba(255,255,255,0.9)',
+                transform: isRefreshing
+                  ? 'scale(1)'
+                  : `scale(${Math.min(pullDistance / 80, 1)})`,
+                animation: isRefreshing ? 'pullSpinnerRotate 0.7s linear infinite' : undefined,
+                transition: isRefreshing ? undefined : 'transform 0.1s ease',
+              }}
+            />
+          </div>
+        )}
+
+        {/* Drag handle */}
+        <div style={{
+          width: 36, height: 5, borderRadius: 3,
+          background: 'rgba(255,255,255,0.28)',
+          margin: '10px auto 0', flexShrink: 0,
+        }} />
+
+        {/* Last-updated timestamp */}
+        <div style={{
+          textAlign: 'center',
+          fontSize: 11,
+          color: 'rgba(235,235,245,0.4)',
+          marginTop: 4,
+          flexShrink: 0,
+          letterSpacing: '0.02em',
+        }}>
+          {lastUpdatedLabel}
+        </div>
+
+        {/* ── SEGMENTED CONTROL ──────────────────────────────────── */}
+        <div
+          style={{
+            position: 'relative', display: 'flex',
+            marginTop: 6, borderBottom: '1px solid rgba(255,255,255,0.1)',
+            flexShrink: 0,
+          }}
+        >
+          <button
+            onClick={() => switchTab('hourly')}
+            style={{
+              flex: 1, padding: '13px 0', fontSize: 15,
+              fontWeight: activeTab === 'hourly' ? 600 : 400,
+              color: activeTab === 'hourly' ? '#FFFFFF' : 'rgba(235,235,245,0.4)',
+              background: 'none', border: 'none', cursor: 'pointer',
+              transition: 'color 250ms ease', fontFamily: 'inherit',
+            }}
+          >
+            Hourly Forecast
+          </button>
+
+          <button
+            onClick={() => switchTab('weekly')}
+            style={{
+              flex: 1, padding: '13px 0', fontSize: 15,
+              fontWeight: activeTab === 'weekly' ? 600 : 400,
+              color: activeTab === 'weekly' ? '#FFFFFF' : 'rgba(235,235,245,0.4)',
+              background: 'none', border: 'none', cursor: 'pointer',
+              transition: 'color 250ms ease', fontFamily: 'inherit',
+            }}
+          >
+            Weekly Forecast
+          </button>
+
+          {/* Animated underline indicator */}
+          <div
+            style={{
+              position: 'absolute', bottom: -1,
+              left: activeTab === 'hourly' ? '0%' : '50%',
+              width: '50%', height: 3,
+              background: 'rgba(255,255,255,0.9)',
+              borderRadius: '2px 2px 0 0',
+              transition: 'left 260ms cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          />
         </div>
         <div style={{ position: 'relative', flexShrink: 0, overflow: 'hidden' }}>
           <AnimatePresence mode="wait" custom={tabDirection}>

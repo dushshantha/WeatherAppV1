@@ -75,7 +75,7 @@ export async function fetchForecastWeekly(city: string): Promise<ForecastRespons
 export async function fetchWeatherAlerts(lat: number, lon: number): Promise<WeatherAlert[]> {
   if (!hasApiKey()) return [];
   const res = await fetch(
-    `https://api.openweathermap.org/data/3.0/onecall?lat=${lat}&lon=${lon}&appid=${API_KEY}&exclude=current,minutely,hourly,daily`
+    `https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&appid=${API_KEY}&exclude=current,minutely,hourly,daily`
   );
   if (!res.ok) return [];
   const data = (await res.json()) as OneCallAlertsResponse;
@@ -84,7 +84,9 @@ export async function fetchWeatherAlerts(lat: number, lon: number): Promise<Weat
 
 export async function reverseGeocode(lat: number, lon: number): Promise<string> {
   if (!hasApiKey()) throw new Error('NO_API_KEY');
-  const res = await fetch(`${BASE_URL}/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}`);
+  const res = await fetch(
+    `${BASE_URL}/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}`
+  );
   if (!res.ok) throw new Error(`API error ${res.status}`);
   const data = (await res.json()) as CurrentWeatherResponse;
   return data.name;

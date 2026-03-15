@@ -5,17 +5,10 @@ import {
   fetchCurrentWeather,
   hasApiKey,
   normalizeCurrentWeather,
+  reverseGeocode,
 } from '../services/weatherApi';
-
-interface CityData {
-  city: string;
-  country: string;
-  temperature: string;
-  condition: string;
-  high: string;
-  low: string;
-  icon: string;
-}
+import { useSavedCities } from '../hooks/useSavedCities';
+import type { CityData } from '../hooks/useSavedCities';
 
 const ALL_CITIES: CityData[] = [
   {
@@ -98,6 +91,51 @@ export default function WeatherSearchScreen({
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState<CityData | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [geoError, setGeoError] = useState<string | null>(null);
+
+  function handleUseMyLocation() {
+    if (!navigator.geolocation) {
+      setGeoError('Geolocation is not supported by your browser.');
+      return;
+    }
+    setGeoLoading(true);
+    setGeoError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          let cityName = 'My Location';
+          if (hasApiKey()) {
+            cityName = await reverseGeocode(pos.coords.latitude, pos.coords.longitude);
+          }
+          onCitySelect?.({
+            city: cityName,
+            country: '',
+            temperature: '--°',
+            condition: '',
+            high: '--°',
+            low: '--°',
+            icon: PLACEHOLDER_ICON,
+          });
+        } catch {
+          setGeoError('Could not detect your city. Please try again.');
+        } finally {
+          setGeoLoading(false);
+        }
+      },
+      (err) => {
+        const msg = err.code === err.PERMISSION_DENIED
+          ? 'Location access denied. Enable permissions and try again.'
+          : 'Could not get your location. Please try again.';
+        setGeoError(msg);
+        setGeoLoading(false);
+      },
+      { timeout: 10000 }
+    );
+  }
+
+  const { savedCities, addCity, removeCity, isSaved } = useSavedCities();
 
   async function handleSearch() {
     const trimmed = query.trim();
@@ -145,6 +183,9 @@ export default function WeatherSearchScreen({
         c.country.toLowerCase().includes(query.toLowerCase())
       )
     : ALL_CITIES;
+
+  // Only show unsaved cities in the browse section to avoid duplication
+  const unsavedFilteredCities = filteredCities.filter((c) => !isSaved(c.city));
 
   return (
     <div
@@ -336,12 +377,141 @@ export default function WeatherSearchScreen({
           gap: 16,
         }}
       >
+        {/* ── USE MY LOCATION ── */}
+        <button
+          onClick={handleUseMyLocation}
+          disabled={geoLoading}
+          style={{
+            width: 342,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            background: 'rgba(255, 255, 255, 0.06)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: 16,
+            padding: '14px 16px',
+            cursor: geoLoading ? 'default' : 'pointer',
+            color: 'rgba(235, 235, 245, 0.9)',
+            fontFamily: 'inherit',
+            opacity: geoLoading ? 0.7 : 1,
+            transition: 'background 0.15s',
+          }}
+          aria-label="Use my location"
+        >
+          {geoLoading ? (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"
+              style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }}>
+              <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.3)" strokeWidth="2" />
+              <path d="M12 3a9 9 0 0 1 9 9" stroke="rgba(100,160,255,0.9)" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true" style={{ flexShrink: 0 }}>
+              <circle cx="12" cy="12" r="4" fill="rgba(100,160,255,0.9)" />
+              <circle cx="12" cy="12" r="8" stroke="rgba(100,160,255,0.9)" strokeWidth="2" fill="none" />
+              <line x1="12" y1="2" x2="12" y2="4" stroke="rgba(100,160,255,0.9)" strokeWidth="2" strokeLinecap="round" />
+              <line x1="12" y1="20" x2="12" y2="22" stroke="rgba(100,160,255,0.9)" strokeWidth="2" strokeLinecap="round" />
+              <line x1="2" y1="12" x2="4" y2="12" stroke="rgba(100,160,255,0.9)" strokeWidth="2" strokeLinecap="round" />
+              <line x1="20" y1="12" x2="22" y2="12" stroke="rgba(100,160,255,0.9)" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          )}
+          <div style={{ textAlign: 'left' }}>
+            <div style={{ fontSize: 15, fontWeight: 500 }}>
+              {geoLoading ? 'Detecting location…' : 'Use my location'}
+            </div>
+            {geoError && (
+              <div style={{ fontSize: 12, color: 'rgba(255,140,140,0.9)', marginTop: 2 }}>
+                {geoError}
+              </div>
+            )}
+          </div>
+        </button>
+
+        <style>{`
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+
+        {/* ── SAVED CITIES SECTION ── */}
+        {!showLiveResult && (
+          <>
+            <div
+              style={{
+                width: 342,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span
+                style={{
+                  fontSize: 17,
+                  fontWeight: 600,
+                  color: 'rgba(235, 235, 245, 0.9)',
+                  letterSpacing: '-0.2px',
+                }}
+              >
+                Saved Cities
+              </span>
+              {savedCities.length > 0 && (
+                <span style={{ fontSize: 13, color: 'rgba(235, 235, 245, 0.4)' }}>
+                  {savedCities.length}/10
+                </span>
+              )}
+            </div>
+
+            {savedCities.length === 0 ? (
+              <p
+                style={{
+                  width: 342,
+                  color: 'rgba(235, 235, 245, 0.4)',
+                  fontSize: 15,
+                  textAlign: 'center',
+                  margin: '8px 0',
+                }}
+              >
+                Search for a city to save it here
+              </p>
+            ) : (
+              savedCities.map((cityData) => (
+                <WeatherCityCard
+                  key={cityData.city}
+                  city={cityData.city}
+                  country={cityData.country}
+                  temperature={cityData.temperature}
+                  condition={cityData.condition}
+                  high={cityData.high}
+                  low={cityData.low}
+                  icon={cityData.icon}
+                  onClick={() => onCitySelect?.(cityData)}
+                  isBookmarked={true}
+                  onBookmark={() => removeCity(cityData.city)}
+                  onRemove={() => removeCity(cityData.city)}
+                />
+              ))
+            )}
+          </>
+        )}
+
+        {/* Divider between saved and browse sections */}
+        {!showLiveResult && savedCities.length > 0 && unsavedFilteredCities.length > 0 && (
+          <div
+            style={{
+              width: 342,
+              height: 1,
+              background: 'rgba(255, 255, 255, 0.1)',
+            }}
+          />
+        )}
+
         {searching && (
           <p style={{ marginTop: 24, color: 'rgba(235,235,245,0.6)', fontSize: 15 }}>
             Searching…
           </p>
         )}
 
+        {/* ── LIVE SEARCH RESULT ── */}
         {!searching && showLiveResult && searchResult && (
           <WeatherCityCard
             city={searchResult.city}
@@ -352,6 +522,12 @@ export default function WeatherSearchScreen({
             low={searchResult.low}
             icon={searchResult.icon}
             onClick={() => onCitySelect?.(searchResult)}
+            isBookmarked={isSaved(searchResult.city)}
+            onBookmark={() =>
+              isSaved(searchResult.city)
+                ? removeCity(searchResult.city)
+                : addCity(searchResult)
+            }
           />
         )}
 
@@ -361,8 +537,9 @@ export default function WeatherSearchScreen({
           </p>
         )}
 
+        {/* ── ALL CITIES (unsaved only, to avoid duplication) ── */}
         {!searching && !showLiveResult && !searchError && (
-          filteredCities.length === 0 ? (
+          unsavedFilteredCities.length === 0 && query.trim() ? (
             <p style={{
               marginTop: 48,
               color: 'rgba(235, 235, 245, 0.4)',
@@ -372,7 +549,7 @@ export default function WeatherSearchScreen({
               No results for &ldquo;{query}&rdquo;
             </p>
           ) : (
-            filteredCities.map((cityData) => (
+            unsavedFilteredCities.map((cityData) => (
               <WeatherCityCard
                 key={cityData.city}
                 city={cityData.city}
@@ -383,6 +560,8 @@ export default function WeatherSearchScreen({
                 low={cityData.low}
                 icon={cityData.icon}
                 onClick={() => onCitySelect?.(cityData)}
+                isBookmarked={false}
+                onBookmark={() => addCity(cityData)}
               />
             ))
           )
