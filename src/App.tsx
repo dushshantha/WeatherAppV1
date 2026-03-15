@@ -7,6 +7,7 @@ type Screen = 'home' | 'search';
 
 function AppInner() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('home');
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100svh', overflow: 'hidden' }}>
       {/* Home screen — slides out left when navigating to search */}

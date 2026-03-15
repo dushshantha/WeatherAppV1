@@ -1,6 +1,11 @@
 import { useState } from 'react';
 import WeatherCityCard from '../components/WeatherCityCard';
 import { weatherIcons } from '../components/weatherIcons';
+import {
+  fetchCurrentWeather,
+  hasApiKey,
+  normalizeCurrentWeather,
+} from '../services/weatherApi';
 
 interface CityData {
   city: string;
@@ -69,6 +74,17 @@ const ALL_CITIES: CityData[] = [
   },
 ];
 
+// Simple inline SVG placeholder icon for live search results
+const mkSvg = (inner: string) =>
+  `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160">${inner}</svg>`
+  )}`;
+
+const PLACEHOLDER_ICON = mkSvg(
+  '<circle cx="80" cy="60" r="30" fill="#FFD060" opacity=".9"/>' +
+  '<ellipse cx="80" cy="105" rx="50" ry="28" fill="white" opacity=".75"/>'
+);
+
 interface WeatherSearchScreenProps {
   onBack?: () => void;
   onCitySelect?: (city: CityData) => void;
@@ -79,8 +95,51 @@ export default function WeatherSearchScreen({
   onCitySelect,
 }: WeatherSearchScreenProps) {
   const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [searchResult, setSearchResult] = useState<CityData | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
-  const filteredCities = query.trim()
+  async function handleSearch() {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    if (hasApiKey()) {
+      setSearching(true);
+      setSearchResult(null);
+      setSearchError(null);
+      try {
+        const raw = await fetchCurrentWeather(trimmed);
+        const norm = normalizeCurrentWeather(raw);
+        setSearchResult({
+          city: norm.city,
+          country: norm.country,
+          temperature: `${norm.tempC}°`,
+          condition: norm.condition.charAt(0).toUpperCase() + norm.condition.slice(1),
+          high: `${norm.tempMaxC}°`,
+          low: `${norm.tempMinC}°`,
+          icon: PLACEHOLDER_ICON,
+        });
+      } catch {
+        setSearchError(`City not found: "${trimmed}"`);
+      } finally {
+        setSearching(false);
+      }
+    }
+    // When no API key: filtering ALL_CITIES is sufficient (handled in render below)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') handleSearch();
+  }
+
+  function handleClear() {
+    setQuery('');
+    setSearchResult(null);
+    setSearchError(null);
+  }
+
+  const showLiveResult = searchResult !== null;
+  const filteredCities = !showLiveResult && query.trim()
     ? ALL_CITIES.filter((c) =>
         c.city.toLowerCase().includes(query.toLowerCase()) ||
         c.country.toLowerCase().includes(query.toLowerCase())
@@ -139,7 +198,7 @@ export default function WeatherSearchScreen({
           padding: '12px 16px 8px',
         }}
       >
-        {/* Top row: back button + title + ellipsis */}
+        {/* Top row: back button + ellipsis */}
         <div
           style={{
             display: 'flex',
@@ -201,31 +260,32 @@ export default function WeatherSearchScreen({
             padding: '8px 12px',
           }}
         >
-          {/* Magnifying glass icon */}
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            aria-hidden="true"
-            style={{ flexShrink: 0, opacity: 0.6 }}
+          {/* Magnifying glass — click to search */}
+          <button
+            onClick={handleSearch}
+            style={{
+              background: 'none', border: 'none', padding: 0,
+              cursor: 'pointer', display: 'flex', alignItems: 'center',
+              flexShrink: 0, opacity: 0.6,
+            }}
+            aria-label="Search"
           >
-            <circle cx="6.5" cy="6.5" r="5" stroke="rgba(235,235,245,0.9)" strokeWidth="1.5" />
-            <line
-              x1="10.5"
-              y1="10.5"
-              x2="14.5"
-              y2="14.5"
-              stroke="rgba(235,235,245,0.9)"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-            />
-          </svg>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"
+              style={{ flexShrink: 0 }}>
+              <circle cx="6.5" cy="6.5" r="5" stroke="rgba(235,235,245,0.9)" strokeWidth="1.5" />
+              <line x1="10.5" y1="10.5" x2="14.5" y2="14.5"
+                stroke="rgba(235,235,245,0.9)" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
 
           <input
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              if (searchResult || searchError) { setSearchResult(null); setSearchError(null); }
+            }}
+            onKeyDown={handleKeyDown}
             placeholder="Search for a city or airport"
             style={{
               flex: 1,
@@ -240,7 +300,7 @@ export default function WeatherSearchScreen({
 
           {query.length > 0 && (
             <button
-              onClick={() => setQuery('')}
+              onClick={handleClear}
               style={{
                 background: 'rgba(235, 235, 245, 0.3)',
                 border: 'none',
@@ -276,31 +336,56 @@ export default function WeatherSearchScreen({
           gap: 16,
         }}
       >
-        {filteredCities.length === 0 ? (
-          <p
-            style={{
+        {searching && (
+          <p style={{ marginTop: 24, color: 'rgba(235,235,245,0.6)', fontSize: 15 }}>
+            Searching…
+          </p>
+        )}
+
+        {!searching && showLiveResult && searchResult && (
+          <WeatherCityCard
+            city={searchResult.city}
+            country={searchResult.country}
+            temperature={searchResult.temperature}
+            condition={searchResult.condition}
+            high={searchResult.high}
+            low={searchResult.low}
+            icon={searchResult.icon}
+            onClick={() => onCitySelect?.(searchResult)}
+          />
+        )}
+
+        {!searching && searchError && (
+          <p style={{ marginTop: 48, color: 'rgba(235,235,245,0.4)', fontSize: 15, textAlign: 'center' }}>
+            {searchError}
+          </p>
+        )}
+
+        {!searching && !showLiveResult && !searchError && (
+          filteredCities.length === 0 ? (
+            <p style={{
               marginTop: 48,
               color: 'rgba(235, 235, 245, 0.4)',
               fontSize: 15,
               textAlign: 'center',
-            }}
-          >
-            No results for "{query}"
-          </p>
-        ) : (
-          filteredCities.map((cityData) => (
-            <WeatherCityCard
-              key={cityData.city}
-              city={cityData.city}
-              country={cityData.country}
-              temperature={cityData.temperature}
-              condition={cityData.condition}
-              high={cityData.high}
-              low={cityData.low}
-              icon={cityData.icon}
-              onClick={() => onCitySelect?.(cityData)}
-            />
-          ))
+            }}>
+              No results for &ldquo;{query}&rdquo;
+            </p>
+          ) : (
+            filteredCities.map((cityData) => (
+              <WeatherCityCard
+                key={cityData.city}
+                city={cityData.city}
+                country={cityData.country}
+                temperature={cityData.temperature}
+                condition={cityData.condition}
+                high={cityData.high}
+                low={cityData.low}
+                icon={cityData.icon}
+                onClick={() => onCitySelect?.(cityData)}
+              />
+            ))
+          )
         )}
       </div>
     </div>
